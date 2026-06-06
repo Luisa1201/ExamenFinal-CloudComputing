@@ -3,7 +3,7 @@ Description: Stack Automatizacion Scheduled Actions y Version 2 LT - Luisa
 
 Resources:
   LTVersion2:
-    Type: AWS::EC2::LaunchTemplateVersion
+    Type: AWS::EC2::LaunchTemplate
     Properties:
       LaunchTemplateId: !ImportValue ALB-ASG-Luisa-LT
       VersionDescription: Version 2 - Actualizacion de aplicacion
