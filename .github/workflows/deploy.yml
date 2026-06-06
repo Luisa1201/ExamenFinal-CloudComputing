@@ -1,0 +1,72 @@
+name: Deploy Infrastructure
+
+on:
+  workflow_dispatch:
+
+jobs:
+  Deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Get Default VPC and Subnets
+        id: network
+        run: |
+          VPC_ID=$(aws ec2 describe-vpcs --filters "Name=isDefault,Values=true" \
+            --query "Vpcs[0].VpcId" --output text)
+          echo "VPC_ID=$VPC_ID" >> $GITHUB_OUTPUT
+
+          SUBNET_ID=$(aws ec2 describe-subnets \
+            --filters "Name=vpc-id,Values=$VPC_ID" "Name=defaultForAz,Values=true" \
+            --query "Subnets[0].SubnetId" --output text)
+          echo "SUBNET_ID=$SUBNET_ID" >> $GITHUB_OUTPUT
+
+          SUBNET_IDS=$(aws ec2 describe-subnets \
+            --filters "Name=vpc-id,Values=$VPC_ID" "Name=defaultForAz,Values=true" \
+            --query "Subnets[*].SubnetId" --output text | tr '\t' ',')
+          echo "SUBNET_IDS=$SUBNET_IDS" >> $GITHUB_OUTPUT
+
+      - name: Deploy Stack Security
+        run: |
+          aws cloudformation deploy \
+            --stack-name SecurityGroups-Stefanny \
+            --template-file stacks/security.yml \
+            --parameter-overrides VpcId=${{ steps.network.outputs.VPC_ID }} \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset
+
+      - name: Deploy Stack EC2
+        run: |
+          aws cloudformation deploy \
+            --stack-name EC2-Stefanny \
+            --template-file stacks/ec2.yml \
+            --parameter-overrides SubnetId=${{ steps.network.outputs.SUBNET_ID }} \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset
+
+      - name: Deploy Stack ALB-ASG
+        run: |
+          aws cloudformation deploy \
+            --stack-name ALB-ASG-Luisa \
+            --template-file stacks/alb-asg.yml \
+            --parameter-overrides \
+              VpcId=${{ steps.network.outputs.VPC_ID }} \
+              SubnetIds=${{ steps.network.outputs.SUBNET_IDS }} \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset
+
+      - name: Deploy Stack Automation
+        run: |
+          aws cloudformation deploy \
+            --stack-name Automation-Luisa \
+            --template-file stacks/automation.yml \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset
