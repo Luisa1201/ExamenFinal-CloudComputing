@@ -1,0 +1,109 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Stack ALB ASG Launch Template Warm Pool - Luisa
+
+Parameters:
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Lista de subnets publicas
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+
+Resources:
+  MyLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: LT-Luisa
+      LaunchTemplateData:
+        InstanceType: t2.micro
+        ImageId: ami-0c02fb55956c7d316
+        SecurityGroupIds:
+          - !ImportValue SecurityGroups-Stefanny-EC2
+        UserData:
+          Fn::Base64: |
+            #!/bin/bash
+            yum update -y
+            yum install -y httpd
+            systemctl start httpd
+            systemctl enable httpd
+            echo "<h1>App ASG - Luisa - Version 1</h1>" > /var/www/html/index.html
+
+  MyTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: TG-Luisa
+      Port: 80
+      Protocol: HTTP
+      VpcId: !Ref VpcId
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      TargetType: instance
+      Tags:
+        - Key: Name
+          Value: TG-Luisa
+
+  MyALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: ALB-Luisa
+      Scheme: internet-facing
+      Type: application
+      Subnets: !Ref SubnetIds
+      SecurityGroups:
+        - !ImportValue SecurityGroups-Stefanny-ALB
+      Tags:
+        - Key: Name
+          Value: ALB-Luisa
+
+  MyListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref MyALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref MyTargetGroup
+
+  MyASG:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: ASG-Luisa
+      MinSize: '1'
+      MaxSize: '4'
+      DesiredCapacity: '2'
+      VPCZoneIdentifier: !Ref SubnetIds
+      LaunchTemplate:
+        LaunchTemplateId: !Ref MyLaunchTemplate
+        Version: !GetAtt MyLaunchTemplate.LatestVersionNumber
+      TargetGroupARNs:
+        - !Ref MyTargetGroup
+      Tags:
+        - Key: Name
+          Value: ASG-Luisa
+          PropagateAtLaunch: true
+
+  MyWarmPool:
+    Type: AWS::AutoScaling::WarmPool
+    Properties:
+      AutoScalingGroupName: !Ref MyASG
+      MinSize: 1
+      PoolState: Stopped
+
+Outputs:
+  ALBDnsName:
+    Description: DNS publico del ALB
+    Value: !GetAtt MyALB.DNSName
+    Export:
+      Name: ALB-Luisa-DNS
+
+  ASGName:
+    Description: Nombre del Auto Scaling Group
+    Value: !Ref MyASG
+    Export:
+      Name: ALB-ASG-Luisa-ASG
+
+  LaunchTemplateId:
+    Description: ID del Launch Template
+    Value: !Ref MyLaunchTemplate
+    Export:
+      Name: ALB-ASG-Luisa-LT
